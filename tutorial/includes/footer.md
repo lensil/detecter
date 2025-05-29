@@ -1,2 +1,0 @@
---- :material-heart:{ .heart } ---
-{: .footer }

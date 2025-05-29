@@ -51,7 +51,7 @@
 -define(MONITOR, '$monitor').
 
 %% Irrevocable verdicts reached by the runtime analysis.
--define(VERDICT_YES, yes).
+-define(VERDICT_INC, 'end').
 -define(VERDICT_NO, no).
 
 %% Small-step semantics rule name identifiers; these rules dictate how a monitor
@@ -72,6 +72,7 @@
 -define(M_CON_N_L, mConNL). % No verdict left conjunction short circuiting.
 -define(M_CON_N_R, mConNR). % No verdict right conjunction short circuiting.
 -define(M_REC, mRec). % Monitor unfolding.
+-define(M_TER, iTer).
 
 %% Monitor environment keys.
 -define(KEY_ENV, env).
@@ -95,7 +96,7 @@
 ?M_VRD | ?M_ACT | ?M_CHS_L | ?M_CHS_R | ?M_PAR.
 %% Small-step semantics rule names.
 
--type verdict() :: ?VERDICT_NO | ?VERDICT_YES.
+-type verdict() :: ?VERDICT_NO | ?VERDICT_INC.
 %% Verdicts reachable by the runtime analysis.
 
 -type monitor() :: term().
@@ -288,10 +289,13 @@ show_pdlist(PdList) ->
 embed(M) ->
   ?TRACE("Embedding monitor in ~w.", [self()]),
 
+  % Start history table if it does not exist.
+  history:start(M),
+
   % Reduce monitor internally until it is in a state where it can analyze the
   % next trace event.
   {PdList_, M_} = reduce_tau(M, []),
-  undefined =:= put(?MONITOR, {PdList_, M_}).
+  undefined =:= put(?MONITOR, {PdList_, M_, []}).
 
 %% @doc Dispatches the specified abstract event to the monitor for analysis.
 %%
@@ -318,36 +322,36 @@ embed(M) ->
 -spec dispatch(Event :: event:int_event()) -> term().
 dispatch(Event = {fork, _Parent, Child, _Mfa}) ->
   do_monitor(event:to_evm_event(Event),
-    fun(Verdict, _) ->
-      format_verdict("After analyzing event ~w.~n", [Event], Verdict)
+    fun(Verdict, Trace) ->
+      format_verdict("After analyzing event ~w.~n", [Event], Verdict, Trace)
     end
   ),
   Child;
 dispatch(Event = {init, _Child, Parent, _Mfa}) ->
   do_monitor(event:to_evm_event(Event),
-    fun(Verdict, _) ->
-      format_verdict("After analyzing event ~w.~n", [Event], Verdict)
+    fun(Verdict, Trace) ->
+      format_verdict("After analyzing event ~w.~n", [Event], Verdict, Trace)
     end
   ),
   Parent;
 dispatch(Event = {exit, _Process, Reason}) ->
   do_monitor(event:to_evm_event(Event),
-    fun(Verdict, _) ->
-      format_verdict("After analyzing event ~w.~n", [Event], Verdict)
+    fun(Verdict, Trace) ->
+      format_verdict("After analyzing event ~w.~n", [Event], Verdict, Trace)
     end
   ),
   Reason;
 dispatch(Event = {send, _Sender, _Receiver, Msg}) ->
   do_monitor(event:to_evm_event(Event),
-    fun(Verdict, _) ->
-      format_verdict("After analyzing event ~w.~n", [Event], Verdict)
+    fun(Verdict, Trace) ->
+      format_verdict("After analyzing event ~w.~n", [Event], Verdict, Trace)
     end
   ),
   Msg;
 dispatch(Event = {recv, _Receiver, Msg}) ->
   do_monitor(event:to_evm_event(Event),
-    fun(Verdict, _) ->
-      format_verdict("After analyzing event ~w.~n", [Event], Verdict)
+    fun(Verdict, Trace) ->
+      format_verdict("After analyzing event ~w.~n", [Event], Verdict, Trace)
     end
   ),
   Msg.
@@ -375,53 +379,102 @@ dispatch(Event = {recv, _Receiver, Msg}) ->
   when
   M :: monitor(),
   PdId :: pd_id().
-derive_tau(L = {'or', _, Yes = {yes, _}, _}, PdId) ->
-  ?DEBUG(":: (~s) Reducing using axiom mDisYL: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
 
-  % Axiom mDisYL.
-  {true, {{PdId, ?M_DIS_Y_L, tau, L, Yes}, Yes}};
-
-derive_tau(L = {'or', _, _, Yes = {yes, _}}, PdId) ->
-  ?DEBUG(":: (~s) Reducing using axiom mDisYR: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
-
-  % Axiom mDisYR.
-  {true, {{PdId, ?M_DIS_Y_R, tau, L, Yes}, Yes}};
-
-derive_tau(L = {'or', _, {no, _}, M}, PdId) ->
+derive_tau(L = {'or', _, No = {no, _}, M}, PdId) ->
   ?DEBUG(":: (~s) Reducing using axiom mDisNL: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
 
-  % Axiom mDisNL.
-  {true, {{PdId, ?M_DIS_N_L, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
+  {_, _, Trace} = get(?MONITOR),
+  CurrentEvent = get('$current_event'),
+  FullTrace = case CurrentEvent of
+    undefined -> lists:reverse(Trace);
+    _ -> lists:reverse([CurrentEvent | Trace])
+  end,
+  FilteredTrace = history:filter_trace(FullTrace),
+  case history:in_history(FilteredTrace) of
+    true ->
+      ?DEBUG(":: (~s) Monitor already in history. Unable to reduce further.", [pdid_to_iolist(PdId)]),
+      {true, {{PdId, ?M_DIS_N_L, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
+    false ->
+      ?DEBUG(":: (~s) Monitor not in history. Adding to history.", [pdid_to_iolist(PdId)]),
+      {true, {{PdId, ?M_DIS_N_L, tau, L, No}, No}}
+  end;
 
-derive_tau(L = {'or', _, M, {no, _}}, PdId) ->
+derive_tau(L = {'or', _, M, No={no, _}}, PdId) ->
   ?DEBUG(":: (~s) Reducing using axiom mDisNR: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
 
-  % Axiom mDisNR.
-  {true, {{PdId, ?M_DIS_N_R, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
+  {_, _, Trace} = get(?MONITOR),
+  CurrentEvent = get('$current_event'),
+  FullTrace = case CurrentEvent of
+    undefined -> lists:reverse(Trace);
+    _ -> lists:reverse([CurrentEvent | Trace])
+  end,
+  FilteredTrace = history:filter_trace(FullTrace),
+  case history:in_history(FilteredTrace) of
+    true ->
+      ?DEBUG(":: (~s) Trace already in history.", [pdid_to_iolist(PdId)]),
+      {true, {{PdId, ?M_DIS_N_R, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
+    false ->
+      ?DEBUG(":: (~s) Trace not in history. Adding to history.", [pdid_to_iolist(PdId)]),
+      {true, {{PdId, ?M_DIS_N_R, tau, L, No}, No}}
+  end;
 
-derive_tau(L = {'and', _, {yes, _}, M}, PdId) ->
+derive_tau(L = {'or', _, Yes = {'end', _}, M}, PdId) ->
+  ?DEBUG(":: (~s) Reducing using axiom mDisYL: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
+  % Axiom mDisYL.
+  {true, {{PdId, ?M_CON_Y_L, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
+
+derive_tau(L = {'or', _, M, Yes = {'end', _}}, PdId) ->
+  ?DEBUG(":: (~s) Reducing using axiom mDisYR: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
+  % Axiom mDisYR.
+  {true, {{PdId, ?M_DIS_Y_R, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
+
+derive_tau(L = {'and', _, No = {no, _}, M}, PdId) ->
+  ?DEBUG(":: (~s) Reducing using axiom mConNL: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
+
+  {_, _, Trace} = get(?MONITOR),
+  CurrentEvent = get('$current_event'),
+  FullTrace = case CurrentEvent of
+    undefined -> lists:reverse(Trace);
+    _ -> lists:reverse([CurrentEvent | Trace])
+  end,
+  FilteredTrace = history:filter_trace(FullTrace),
+  case history:in_history(FilteredTrace) of
+    true ->
+      {true, {{PdId, ?M_CON_N_L, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
+    false ->
+      {true, {{PdId, ?M_CON_N_L, tau, L, No}, No}}
+  end;
+
+derive_tau(L = {'and', _, M, No = {no, _}}, PdId) ->
+  ?DEBUG(":: (~s) Reducing using axiom mConNR: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
+
+  {_, _, Trace} = get(?MONITOR),
+  CurrentEvent = get('$current_event'),
+  FullTrace = case CurrentEvent of
+    undefined -> lists:reverse(Trace);
+    _ -> lists:reverse([CurrentEvent | Trace])
+  end,
+  FilteredTrace = history:filter_trace(FullTrace),
+  case history:in_history(FilteredTrace) of
+    true ->
+      {true, {{PdId, ?M_CON_N_R, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
+    false ->
+      history:add_to_history(lists:reverse(Trace)),
+      {true, {{PdId, ?M_CON_N_R, tau, L, No}, No}}
+  end;
+
+derive_tau(L = {'and', _, {'end', _}, M}, PdId) ->
   ?DEBUG(":: (~s) Reducing using axiom mConYL: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
 
   % Axiom mConYL.
   {true, {{PdId, ?M_CON_Y_L, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
 
-derive_tau(L = {'and', _, M, {yes, _}}, PdId) ->
+derive_tau(L = {'and', _, M, {'end', _}}, PdId) ->
   ?DEBUG(":: (~s) Reducing using axiom mConYR: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
 
   % Axiom mConYR.
   {true, {{PdId, ?M_CON_Y_R, tau, L, copy_ns(L, copy_ctx(L, M))}, copy_ns(L, copy_ctx(L, M))}};
 
-derive_tau(L = {'and', _, No = {no, _}, _}, PdId) ->
-  ?DEBUG(":: (~s) Reducing using axiom mConNL: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
-
-  % Axiom mConNL.
-  {true, {{PdId, ?M_CON_N_L, tau, L, No}, No}};
-
-derive_tau(L = {'and', _, _, No = {no, _}}, PdId) ->
-  ?DEBUG(":: (~s) Reducing using axiom mConNR: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
-
-  % Axiom mConNR.
-  {true, {{PdId, ?M_CON_N_R, tau, L, No}, No}};
 
 derive_tau(L = {rec, Env, M}, PdId) ->
   ?DEBUG(":: (~s) Reducing using axiom mRec: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L)]),
@@ -464,7 +517,6 @@ derive_tau(L = {var, Env, M}, PdId) ->
   {true, {{PdId, ?M_REC, tau, L, copy_ctx(L_, M_)}, copy_ctx(L_, M_)}};
 
 derive_tau(L = {Op, Env, M, N}, PdId) when Op =:= 'and'; Op =:= 'or' ->
-
   % Parallel monitors may transition internally by either reducing their left or
   % right sub-monitor constituents. The formal semantics presented in the paper
   % leave this selection unspecified. This implementation opts for trying to
@@ -514,39 +566,34 @@ derive_tau(_, _) ->
   Event :: event(),
   M :: monitor(),
   PdId :: pd_id().
-derive_act(Event, M = {V, _}, PdId) when V =:= yes; V =:= no ->
+derive_act(Event, M = {V, _}, PdId) when V =:= 'end'; V =:= no ->
   ?assertNot(Event =:= tau),
   ?DEBUG(":: (~s) Reducing using axiom mVrd: ~s.", [pdid_to_iolist(PdId), m_to_iolist(M)]),
 
   % Axiom mVrd.
   {{PdId, ?M_VRD, Event, M, M}, M};
 
-derive_act(Event, L = {act, Env, C, M}, PdId) ->
+derive_act(Event, L = {act, Env, M}, PdId) ->
   ?assertNot(Event =:= tau),
-%%  ?assert(C(Event)),
   ?assert(is_function(M, 1)),
 
-  % Get the variable binder associated with this action.
-  Binder = unwrap_value(get_var(Env)),
-
-  % Instantiate the variable binder with data from the trace event, and extend
-  % the variable context. Variables in the context are tagged with the current
-  % namespace, which is the scope of the current recursion definition.
-  % Populating data variables is used for debugging purposes.
-  Ns = get_ns(Env),
-  L_ = set_env(L, set_ctx(Env, new_binding(get_ctx(Env), unwrap_value(Ns), Binder, Event))),
-
-  ?DEBUG(":: (~s) Reducing using rule mAct: ~s.", [pdid_to_iolist(PdId), m_to_iolist(L_)]),
-
-  % Monitor actions are encoded as functions. The function needs to be applied
-  % to the event being analysed to unfold the monitor. Axiom mAct.
-  M_ = M(Event),
-  ?assertNot(is_function(M_)),
-
-  % Copy the variable binding context of the current monitor to the binding
-  % context of the next unfolding.
-  {{PdId, ?M_ACT, Event, L, copy_ns(L_, copy_ctx(L_, M_))}, copy_ns(L_, copy_ctx(L_, M_))}; % Updated monitor env.
-
+  try M(Event) of
+    M_ ->
+      ?assertNot(is_function(M_)),
+      {{PdId, ?M_ACT, Event, L, copy_ns(L, copy_ctx(L, M_))}, 
+        copy_ns(L, copy_ctx(L, M_))}
+  catch
+    _:_ ->
+      % Pattern/guard did not match - implement iTer rule
+      case {L =/= no, derive_tau(L, PdId)} of
+        {true, false} ->
+          % Cannot make α or τ transition -> transition to end
+          Env_ = get_env(L),
+          {{PdId, ?M_TER, Event, L, {'end', Env_}}, {'end', Env_}};
+        _ -> 
+          rethrow
+      end
+  end;
 derive_act(Event, L = {chs, _, M, N}, PdId) ->
   ?assert(is_tuple(M) andalso element(1, M) =:= act),
   ?assert(is_tuple(N) andalso element(1, N) =:= act),
@@ -798,28 +845,22 @@ m_to_iolist(M) ->
 %%          variable binding context to substitute variables. For the time being
 %%          this context is not used, but will be used in the future.
 -spec m_to_iolist(M :: monitor(), Ctx :: list({atom(), any()})) -> iolist().
-m_to_iolist({yes, Env = {env, _}}, _) ->
+m_to_iolist({'end', Env = {env, _}}, _) ->
   unwrap_value(get_str(Env));
 m_to_iolist({no, Env = {env, _}}, _) ->
   unwrap_value(get_str(Env));
 m_to_iolist({var, Env = {env, _}, _}, _) ->
   unwrap_value(get_str(Env));
-m_to_iolist({act, Env = {env, _}, _, M}, Ctx) ->
-
-  % The continuation of an action is encoded as a function. In order to
-  % stringify the rest of the monitor, this function needs to be applied so that
-  % it is "peeled away" and the rest of the monitor can be accessed. Unfold the
-  % continuation monitor function using dummy data obtained from the monitor
-  % itself: this dummy data matches exactly by the function encoding the pattern
-  % corresponding to the trace event. This dummy data does not interfere with
-  % the constraint segment of the action, since constraints are not present in
-  % the function encoding the monitor continuation body. Note that functions
-  % encoding actions accept a single parameter.
-%%  ?TRACE(">> Pat is: ~p", [get_pat(Env)]),
-%%  ?TRACE(">> Unwrapped Pat is: ~p", [unwrap_value(get_pat(Env))]),
-  M_ = M(unwrap_value(get_pat(Env))),
-
-  [re:replace(unwrap_value(get_str(Env)), " when ", ","), $., m_to_iolist(M_, Ctx)];
+m_to_iolist({act, Env = {env, _}, Fun}, Ctx) ->
+  % Extract just the pattern string from the environment
+  Str = unwrap_value(get_str(Env)),
+  
+  % Try to unfold continuation if possible, otherwise just show the action  
+  try Fun(unwrap_value(get_pat(Env))) of
+    M_ -> [Str, $., m_to_iolist(M_, Ctx)]
+  catch 
+    _:_ -> Str
+  end;
 m_to_iolist({chs, Env = {env, _}, M, N}, Ctx) ->
   [$(, m_to_iolist(M, Ctx), $ , unwrap_value(get_str(Env)), $ , m_to_iolist(N, Ctx), $)];
 m_to_iolist({'or', Env = {env, _}, M, N}, Ctx) ->
@@ -897,7 +938,11 @@ do_monitor(Event, VerdictFun) when is_function(VerdictFun, 2) ->
     undefined ->
       ?TRACE("Analyzer undefined; discarding trace event ~w.", [Event]),
       undefined;
-    {PdList, M} ->
+    {PdList, M, Trace} ->
+      put('$current_event', Event),
+
+      % Update the trace with the new event.
+      NewTrace = [Event | Trace],
 
       % Check whether the trace event should be recorded. We do this via the
       % environmental variable DEBUG.
@@ -922,16 +967,38 @@ do_monitor(Event, VerdictFun) when is_function(VerdictFun, 2) ->
       % Check whether verdict is reached to enable immediate detection, should
       % this be the case.
 %%      put(?MONITOR, {PdList_, M_} = analyze(Event, M, PdList)),
-      put(?MONITOR, {_, M_} = analyze(Event, M, [])), % TODO: Use to discard the PdList and make monitor more space efficient.
+      % Analyze event and store new state with updated trace
+      case Event of
+{trace, _, spawn, _, _} ->
+% For fork events, just update trace without analysis
+erase('$current_event'),
+put(?MONITOR, {PdList, M, NewTrace}),
+M;
+_ ->
+      {_, M_} = analyze(Event, M, []),
+      erase('$current_event'),
+      put(?MONITOR, {[], M_, NewTrace}),
       case is_verdict(M_) of
-        true ->
-          {Verdict, _} = M_,
-%%          VerdictFun(Verdict, PdList_);
-          VerdictFun(Verdict, []); % TODO: Use to discard the PdList and make monitor more space efficient.
-        false ->
-          ok
-      end,
-      M_
+  true ->
+    {Verdict, Env} = M_,
+    % Check if the trace needs to be added to the history
+    case Verdict of
+      no ->
+        % Add the trace that led to no verdict to history
+        history:add_to_history(lists:reverse(NewTrace)),
+        % Change to 'end' verdict after adding to history
+        M_New = {'end', Env},
+        put(?MONITOR, {[], M_New, NewTrace}),
+        VerdictFun('end', lists:reverse(NewTrace)),
+        M_New; % Return the updated monitor state
+      _ -> 
+        VerdictFun(Verdict, lists:reverse(NewTrace)),
+        M_
+    end;
+  false ->
+    M_
+end
+end
   end.
 
 %% @doc Default filter that allows all events to pass.
@@ -940,22 +1007,30 @@ filter(_) ->
   true. % True = keep event.
 
 %% @private Determines whether the specified monitor is indeed a verdict.
--spec is_verdict(V :: {?VERDICT_YES | ?VERDICT_NO, env()}) -> boolean().
-is_verdict({V, _}) when V =:= ?VERDICT_YES; V =:= ?VERDICT_NO ->
+-spec is_verdict(V :: {?VERDICT_INC | ?VERDICT_NO, env()}) -> boolean().
+is_verdict({V, _}) when V =:= ?VERDICT_INC; V =:= ?VERDICT_NO ->
   true;
 is_verdict(_) ->
   false.
 
 %% @private Formats verdicts in the correct colors.
--spec format_verdict(Fmt, Args, M) -> ok
+-spec format_verdict(Fmt, Args, M, _) -> ok
   when
   Fmt :: io:format(),
   Args :: list(),
   M :: verdict().
-format_verdict(Fmt, Args, no) ->
-  io:format(lists:flatten(["\e[1;31m:: Violation: ", Fmt, "\e[0m"]), Args);
-format_verdict(Fmt, Args, yes) ->
-  io:format(lists:flatten(["\e[1;32m:: Satisfaction: ", Fmt, "\e[0m"]), Args).
+format_verdict(Fmt, Args, no, Trace) ->
+  io:format(lists:flatten(["\e[1;31m:: Violation: ", Fmt, "\e[0m"]), Args),
+  io:format("\n\e[1;31mTrace:\e[0m\n"),
+    lists:foreach(fun(Event) ->
+      io:format("  ~p\n", [Event])
+    end, Trace);
+format_verdict(Fmt, Args, 'end', Trace) ->
+  io:format(lists:flatten(["\e[1;33m:: Inconclusive: ", Fmt, "\e[0m"]), Args),
+  io:format("\n\e[1;33mTrace:\e[0m\n"),
+  lists:foreach(fun(Event) ->
+    io:format("  ~p\n", [Event])
+  end, Trace).
 
 %% Tests.
 %%{ok, M} = lin_7:m5().

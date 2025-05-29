@@ -1,17 +1,31 @@
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/duncanatt/detecter/Build?logo=GitHub&logoColor=white)
-![GitHub last commit](https://img.shields.io/github/last-commit/duncanatt/detecter)
-![GitHub](https://img.shields.io/badge/version-0.9-yellow)
-![GitHub](https://img.shields.io/github/license/duncanatt/detecter)
+## Project Structure
 
-![GitHub issues](https://img.shields.io/github/issues/duncanatt/detecter)
-![GitHub closed issues](https://img.shields.io/github/issues-closed/duncanatt/detecter)
+- **`/detecter/src/synthesis`**: Contains the modifications and extensions for multi-run monitoring:
+    - **`lin_analyzer.erl`**: contains logic modified for operational rules implementation
+    - **`history.erl`**: main module for history analysis
 
-# detectEr
+- **`/examples/erlang/props`**: Example formula mentioned in report:
+    - **`prop_correct_start.hml`**: formula $\varphi_1$
+    - **`prop_add_close.hml`**: formula $\varphi_3$
+    - **`prop_add_req.hml`**: formula $\varphi_4$
 
-A runtime verification tool for monitoring asynchronous component systems.
+- **`/examples/demo`**: Calculator server:
+    - **`calc_server.erl`**: correct server implementation
+    - **`calc_server_bug.erl`**: bugged server implementation
 
-Follow the official [tutorial page](https://duncanatt.github.io/detecter) to learn more!
+### Example Usage
 
-# Releases
-
-* [![DOI](https://zenodo.org/badge/342591077.svg)](https://zenodo.org/badge/latestdoi/342591077) COORDINATION 2020 artifact evaluation
+1. Navigate to the examples directory from the root of the project and start the Erlang shell:
+   ```bash
+   cd examples/erlang
+   erl -pa ../../detecter/ebin ebin
+   ```
+2. Compile the formula and weave the files:
+    ```bash
+    maxhml_eval:compile("props/prop_add_close.hml", [{outdir, "ebin"}]).
+    lin_weaver:weave("src/demo", fun prop_add_close:mfa_spec/1, [{outdir, "ebin"}]).
+    ```
+3. Start the server:
+    ```bash
+    Pid = calc_server:start(0).
+    ```

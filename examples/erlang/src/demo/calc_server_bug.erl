@@ -1,24 +1,4 @@
-%%% ----------------------------------------------------------------------------
-%%% @author Duncan Paul Attard
-%%%
-%%% @doc Example buggy calculator service.
-%%% @end
-%%% 
-%%% Copyright (c) 2021, Duncan Paul Attard <duncanatt@gmail.com>
-%%%
-%%% This program is free software: you can redistribute it and/or modify it 
-%%% under the terms of the GNU General Public License as published by the Free 
-%%% Software Foundation, either version 3 of the License, or (at your option) 
-%%% any later version.
-%%%
-%%% This program is distributed in the hope that it will be useful, but WITHOUT 
-%%% ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or 
-%%% FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-%%% more details.
-%%%
-%%% You should have received a copy of the GNU General Public License along with 
-%%% this program. If not, see <https://www.gnu.org/licenses/>.
-%%% ----------------------------------------------------------------------------
+
 -module(calc_server_bug).
 -author("Duncan Paul Attard").
 
@@ -74,7 +54,21 @@ loop(Tot) ->
 
       % Handle multiplication request from client.
       Clt ! {ok, A * B},
-      loop(Tot + 1);
+      % Bug - enter new loop where after a close request the server loops instead of closing the server
+      receive 
+        {Clt, {add, A, B}} ->
+
+          % Handle addition request from client.
+          Clt ! {ok, A + B},
+          loop(Tot + 1);
+        {Clt, {mul, A, B}} ->
+          % Handle multiplication request from client.
+          Clt ! {ok, A * B},
+          loop(Tot + 1);
+        {Clt, stp} ->
+          % Handle stop request. Server does not loop again.
+          loop(Tot + 1)
+      end;
 
     {Clt, stp} ->
 

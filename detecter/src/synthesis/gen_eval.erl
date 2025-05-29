@@ -415,8 +415,9 @@ pat_tuple({send, _, Pid, To, Var}) ->
   erl_syntax:tuple([
     erl_syntax:atom(trace), Pid, erl_syntax:atom(send), Var, To]);
 pat_tuple({recv, _, Pid, Var}) ->
-  erl_syntax:tuple([
-    erl_syntax:atom(trace), Pid, erl_syntax:atom('receive'), Var]).
+  Tuple = erl_syntax:tuple([
+    erl_syntax:atom(trace), Pid, erl_syntax:atom('receive'), Var]),
+  Tuple.
 
 -spec mfargs_tuple(MFArgs :: af_mfargs()) -> erl_syntax:syntaxTree().
 mfargs_tuple({?MFARGS, _, M, F, Args}) ->

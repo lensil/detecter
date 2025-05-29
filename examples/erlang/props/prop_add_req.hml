@@ -1,0 +1,13 @@
+with
+  calc_server_bug:loop(_)
+check
+  [{_ <- _, calc_server_bug:loop(_)}]
+  max X.(
+    [{_ ? {_, {Req, _, _}} when Req =:= add orelse Req =:= mul}][{_:_ ! {_, _}}]X
+    and 
+    [{_ ? {_, stp}}](
+      [{_:_ ! {bye, _}}]ff
+      or
+      [{_ ? {_, _}}]ff
+    )
+  ).

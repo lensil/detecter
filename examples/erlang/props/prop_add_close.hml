@@ -1,0 +1,16 @@
+with
+  calc_server:loop(_)
+check
+  [{_ <- _, calc_server:loop(_)}]
+  max X.(
+      ([{_:_ ! {bye, _}}]ff
+      or
+      [{_ ? {_, {add, _, _}}}]ff)
+    and (
+      ([{_ ? {_, {add, A, B}}}]
+      [{_:_ ! {_, Res} when Res =:= A+B}]X)
+      and
+      ([{_ ? {_, {mul, A, B}}}]
+      [{_:_ ! {_, Res} when Res =:= A*B}]ff)
+      )
+  ).

@@ -65,7 +65,7 @@
 -define(MFARGS, mfargs).
 
 %% Monitor AST node tags.
--define(MON_ACC, yes).
+-define(MON_INC, 'end').
 -define(MON_REJ, no).
 -define(MON_ACT, act).
 -define(MON_CHS, chs).
@@ -147,7 +147,7 @@ visit(Node = {Bool, _}, _Opts) when Bool =:= ?HML_TRU; Bool =:= ?HML_FLS ->
   % Get monitor meta environment for node.
   Env = get_env(Node),
   erl_syntax:tuple([erl_syntax:atom(
-    if Bool =:= ?HML_TRU -> ?MON_ACC; Bool =:= ?HML_FLS -> ?MON_REJ end
+    if Bool =:= ?HML_TRU -> ?MON_INC; Bool =:= ?HML_FLS -> ?MON_REJ end
   ), Env]);
 
 visit(Var = {?HML_VAR, _, _Name}, _Opts) ->
@@ -180,52 +180,18 @@ visit(Node = {Op, _, Phi, Psi}, _Opts)
 visit(Node = {Mod, _, {act, _, Pat, Guard}, Phi}, _Opts)
   when Mod =:= ?HML_POS; Mod =:= ?HML_NEC ->
   ?TRACE("Visiting '~s' node ~p.", [Mod, Node]),
-
-  % Encode the predicate functions for the action and its inverse. The predicate
-  % functions are mutually-exclusive. This means that for any pattern and guard
-  % combination, and any value the pattern data variables may be mapped to,
-  % these two predicate functions will always return the negated truth value of
-  % of each other.
-  Pred = erl_syntax:fun_expr([
-    erl_syntax:clause([gen_eval:pat_tuple(Pat)], Guard, [erl_syntax:atom(true)]),
-    erl_syntax:clause([erl_syntax:underscore()], none, [erl_syntax:atom(false)])
-  ]),
-
-  InvPred = erl_syntax:fun_expr([
-    erl_syntax:clause([gen_eval:pat_tuple(Pat)], Guard, [erl_syntax:atom(false)]),
-    erl_syntax:clause([erl_syntax:underscore()], none, [erl_syntax:atom(true)])
-  ]),
-
-  % Encode the action bodies. The normal (left) action body consists of the
-  % pattern with variables, and the continuation monitor. The inverse (right)
-  % action consists of the verdict when the inverse pattern and guard test is
-  % successful.
-  CntBody = erl_syntax:fun_expr([
-    erl_syntax:clause([gen_eval:pat_tuple(Pat)], none, [visit(Phi, _Opts)])
-  ]),
-
-  VrdBody = erl_syntax:fun_expr([
-    erl_syntax:clause([erl_syntax:underscore()], none, [
-      if Mod =:= pos ->
-        erl_syntax:tuple([erl_syntax:atom(?MON_REJ), get_env({ff, 0})]);
-        Mod =:= nec ->
-          erl_syntax:tuple([erl_syntax:atom(?MON_ACC), get_env({tt, 0})])
-      end
-    ])
-  ]),
-
-  % Get a new unique placeholder for this monitor action.
   Ph = new_ph(),
+  Env = get_env(Node, Ph, true),
+  
 
-  % Encode left and right action nodes.
-  LeftAct = erl_syntax:tuple(
-    [erl_syntax:atom(act), get_env(Node, Ph, true), Pred, CntBody]),
-  RightAct = erl_syntax:tuple(
-    [erl_syntax:atom(act), get_env(Node, Ph, false), InvPred, VrdBody]),
-
-  % Encode the mutually-exclusive choice consisting of the left and right
-  % summands.
-  erl_syntax:tuple([erl_syntax:atom(chs), get_chs_env(), LeftAct, RightAct]).
+  % Encode action with pattern matching and continuation
+  erl_syntax:tuple([
+    erl_syntax:atom(?MON_ACT),
+    Env,
+    erl_syntax:fun_expr([
+      erl_syntax:clause([gen_eval:pat_tuple(Pat)], Guard, [visit(Phi, _Opts)])
+    ])
+  ]).
 
 
 %%% ----------------------------------------------------------------------------
@@ -305,7 +271,7 @@ new_env(List) ->
   Node :: af_hml_tt() | af_hml_ff() | af_hml_or() | af_hml_and() |
   af_hml_max() | af_hml_var().
 get_str({?HML_TRU, _}) ->
-  erl_syntax:string("yes");
+  erl_syntax:string("end");
 get_str({?HML_FLS, _}) ->
   erl_syntax:string("no");
 get_str({Op, _, _, _}) when Op =:= ?HML_OR; Op =:= ?HML_AND ->
@@ -367,10 +333,10 @@ get_chs_str() ->
 -spec get_pat(Node :: af_hml_pos() | af_hml_nec()) -> erl_syntax:syntaxTree().
 get_pat({Mod, _, {?HML_ACT, _, Pat, Guard}, _})
   when Mod =:= ?HML_POS; Mod =:= ?HML_NEC ->
-
   Str = erl_pp:expr(erl_syntax:revert(gen_eval:pat_tuple(Pat))),
-  Replaced = re:replace(Str, "\\b([A-Z_][a-zA-Z0-9_@]*)\\b", "undefined", [{return, list}, global]),
-
+  % Replace variables with their string representation
+  Replaced = re:replace(Str, "\\b([A-Z_][a-zA-Z0-9_@]*)\\b", 
+                        "'\\1'", [{return, list}, global]),
   {ok, Tokens, _EndLine} = erl_scan:string(Replaced ++ "."),
   {ok, [AbsForm]} = erl_parse:parse_exprs(Tokens),
   AbsForm.

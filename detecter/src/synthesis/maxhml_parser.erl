@@ -1498,8 +1498,8 @@ yeccpars2_165(_S, Cat, Ss, Stack, T, Ts, Tzr) ->
 -dialyzer({nowarn_function, yeccpars2_166/7}).
 yeccpars2_166(S, '(', Ss, Stack, T, Ts, Tzr) ->
  yeccpars1(S, 170, Ss, Stack, T, Ts, Tzr);
-yeccpars2_166(S, '<', Ss, Stack, T, Ts, Tzr) ->
- yeccpars1(S, 171, Ss, Stack, T, Ts, Tzr);
+%yeccpars2_166(S, '<', Ss, Stack, T, Ts, Tzr) ->
+ %yeccpars1(S, 171, Ss, Stack, T, Ts, Tzr);
 yeccpars2_166(S, '[', Ss, Stack, T, Ts, Tzr) ->
  yeccpars1(S, 172, Ss, Stack, T, Ts, Tzr);
 yeccpars2_166(S, ff, Ss, Stack, T, Ts, Tzr) ->
@@ -1727,8 +1727,8 @@ yeccpars2_211(_S, Cat, Ss, Stack, T, Ts, Tzr) ->
  yeccgoto_maxhml_fact(hd(Nss), Cat, Nss, NewStack, T, Ts, Tzr).
 
 -dialyzer({nowarn_function, yeccpars2_212/7}).
-yeccpars2_212(S, '>', Ss, Stack, T, Ts, Tzr) ->
- yeccpars1(S, 213, Ss, Stack, T, Ts, Tzr);
+%yeccpars2_212(S, '>', Ss, Stack, T, Ts, Tzr) ->
+% yeccpars1(S, 213, Ss, Stack, T, Ts, Tzr);
 yeccpars2_212(_, _, _, _, T, _, _) ->
  yeccerror(T).
 
