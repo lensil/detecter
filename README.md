@@ -15,8 +15,6 @@
 
 ### Example Usage
 
-### Example Usage
-
 1. Navigate to the detecter directory from the root of the project and compile:
    ```bash
    cd detecter
