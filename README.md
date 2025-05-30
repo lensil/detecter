@@ -15,17 +15,25 @@
 
 ### Example Usage
 
-1. Navigate to the examples directory from the root of the project and start the Erlang shell:
+### Example Usage
+
+1. Navigate to the detecter directory from the root of the project and compile:
    ```bash
-   cd examples/erlang
+   cd detecter
+   make
+   ```
+2. Navigate to the examples, compile and start the Erlang shell:
+   ```bash
+   cd ../examples/erlang
+   make
    erl -pa ../../detecter/ebin ebin
    ```
-2. Compile the formula and weave the files:
+3. Compile the formula and weave the files:
     ```bash
     maxhml_eval:compile("props/prop_add_close.hml", [{outdir, "ebin"}]).
     lin_weaver:weave("src/demo", fun prop_add_close:mfa_spec/1, [{outdir, "ebin"}]).
     ```
-3. Start the server:
+4. Start the server:
     ```bash
     Pid = calc_server:start(0).
     ```
