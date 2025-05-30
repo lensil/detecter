@@ -1,11 +1,34 @@
 -module(history).
 -export([start/1, in_history/1, add_to_history/1, set_determinism_function/1, get_determinism_function/0, history_analysis/0, filter_trace/1]).
 
+ensure_persistent_owner() ->
+    case whereis(history_keeper) of
+        undefined ->
+            Pid = spawn(fun() -> 
+                receive
+                    stop -> ok
+                after 
+                    infinity -> ok
+                end
+            end),
+            register(history_keeper, Pid),
+            Pid;
+        Pid ->
+            Pid
+    end.
+
 start(Monitor) ->
     case ets:info(history) of
         undefined -> 
+            % Create tables
             ets:new(history, [named_table, bag, public]),
             ets:new(monitor, [named_table, set, public]),
+            
+            % Transfer ownership to persistent process
+            OwnerPid = ensure_persistent_owner(),
+            ets:give_away(history, OwnerPid, history_table),
+            ets:give_away(monitor, OwnerPid, monitor_table),
+            
             ets:insert(monitor, {m, Monitor});
         _ -> 
             ok
@@ -732,6 +755,5 @@ bfs_analyze_history(H, Monitor) ->
         true ->
             io:format("Analysis Result:: History is rejected~n");
         false ->
-            io:format("Analysis Result:S: History is inconclusive~n")
-
+            io:format("Analysis Result: History is inconclusive~n")
     end.
