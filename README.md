@@ -1,6 +1,7 @@
 ## Project Structure
 
 - **`/detecter/src/synthesis`**: Contains the modifications and extensions for multi-run monitoring:
+    - **`maxhml_eval.erl`**: generates monitors
     - **`lin_analyzer.erl`**: contains logic modified for operational rules implementation
     - **`history.erl`**: main module for history analysis
 
